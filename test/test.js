@@ -3,172 +3,233 @@ const { ethers } = require("hardhat");
 
 describe("Wallet Contract Test", function () {
 
+  let deployerAccount, investorAddr1, investorAddr2, investorAddr3, designWalletAddr;
   let testToken;
   let wallet;
-  let addr1 = "0x56aAa95453fcb6Cdeb67aEF3B1dAEd00FaDC7a6c";
-  let addr2 = "0xAE688de39e10410B306B7533F0e6007aa7FE6A32"; //Deployer & Owner Address
-  let addr3 = "0xB5D22011C8e2fE19B27A7F5CAd539d6e7f479Fdf";
   let nullAddress = "0x0000000000000000000000000000000000000000";
+  let investorAddrBal = [0, 0, 0];
+  let released = 0;
+  let releasing = 0;
+  let addrShares = [1000, 500, 2000];
+  let addrFees = [5, 10, 0];
+  let addrReleasing = [0, 0, 0];
+  let feesReleasing = 0;
+  let addrClaimed = [0, 0, 0];
+  let feesClaimed = 0;
+  let claimed = 0;
 
-  beforeEach(async function () {
-    // Get the ContractFactory and Signers here.
+  before(async function () {
+    [deployerAccount, investorAddr1, investorAddr2, investorAddr3, designWalletAddr] = await ethers.getSigners();
+
+    // Deploy Test Token Contract
     const TestToken = await ethers.getContractFactory("TestToken");
     testToken = await TestToken.deploy();
-    await testToken.deployed();    
-
+    await testToken.deployed();
+    
+    // Deploy Wallet Contract
     const Wallet = await ethers.getContractFactory("DesignWallet");
-    wallet = await Wallet.deploy("Test", testToken.address);
+    wallet = await Wallet.deploy("Test Investment", nullAddress);
     await wallet.deployed();
 
-    const setFeesWallet = await wallet.setFeesWallet(addr1.toString());
-    await setFeesWallet.wait();
+    // Get Investors Wallet Token Balances
+    investorAddrBal[0] = await testToken.balanceOf(investorAddr1.address);
+    investorAddrBal[1] = await testToken.balanceOf(investorAddr2.address);
+    investorAddrBal[2] = await testToken.balanceOf(investorAddr3.address);
   });
 
-  describe("Deployment", function () {
-    it("Verify Deployed Contract Investment and Token Address", async function () {
-      expect(await wallet._investment()).to.equal("Test");
-      expect(await wallet._tokenAddress()).to.equal(testToken.address);
-      expect(await wallet._0xDesignAddress()).to.equal(addr1.toString());
+  describe("Verify Deployed Contract", function () {
+    it("Investment Name 'Test Investment'", async function () {
+      expect(await wallet._investment()).to.equal("Test Investment");
+    });
+
+    it("Token Address", async function () {
+      expect(await wallet._tokenAddress()).to.equal(nullAddress);
+    });
+
+    it("0xDesign Wallet Address", async function () {
+      expect(await wallet._0xDesignAddress()).to.equal(deployerAccount.address);
     });
   });
 
   describe("Transactions", function () {
     it("Change Token Address", async function () {
-      const tokenAddressChange = await wallet.changeTokenAddress(nullAddress);
+      const tokenAddressChange = await wallet.changeTokenAddress(testToken.address);
       await tokenAddressChange.wait();
 
-      expect(await wallet._tokenAddress()).to.equal(nullAddress);
+      expect(await wallet._tokenAddress()).to.equal(testToken.address);
     });
   
     it("Change 0xDesign Wallet Address", async function () {
-      const feesWalletChange = await wallet.setFeesWallet(addr1.toString());
+      const feesWalletChange = await wallet.setFeesWallet(designWalletAddr.address);
       await feesWalletChange.wait();
 
-      expect(await wallet._0xDesignAddress()).to.equal(addr1.toString());
+      expect(await wallet._0xDesignAddress()).to.equal(designWalletAddr.address);
     });
   
-    it("Set Payees", async function () {
-      const addPayees = await wallet._addPayees([addr1.toString(), addr2.toString()], [1000, 500], [5, 10]);
+    it("Add Two Payees", async function () {
+      const addPayees = await wallet._addPayees([investorAddr1.address, investorAddr2.address], [addrShares[0], addrShares[1]], [addrFees[0], addrFees[1]]);
       await addPayees.wait();
 
-      expect(await wallet.payee(0)).to.equal(addr1.toString());
-      expect(await wallet.shares(addr1.toString())).to.equal("1000");
-      expect(await wallet.claimed(addr1.toString())).to.equal("0");
-      expect(await wallet.payee(1)).to.equal(addr2.toString());
-      expect(await wallet.shares(addr2.toString())).to.equal("500");
-      expect(await wallet.claimed(addr2.toString())).to.equal("0");
+      expect(await wallet.payee(0)).to.equal(investorAddr1.address);
+      expect(await wallet.shares(investorAddr1.address)).to.equal("1000");
+      expect(await wallet.claimed(investorAddr1.address)).to.equal("0");
+      expect(await wallet.payee(1)).to.equal(investorAddr2.address);
+      expect(await wallet.shares(investorAddr2.address)).to.equal("500");
+      expect(await wallet.claimed(investorAddr2.address)).to.equal("0");
       expect(await wallet.totalShares()).to.equal("1500");
       expect(await wallet.totalClaimed()).to.equal("0");
-  
-      const addPayee = await wallet._addPayee(addr3.toString(), 2000, 0);
+    });
+
+    it("Add One Payee", async function () {
+      const addPayee = await wallet._addPayee(investorAddr3.address, addrShares[2], addrFees[2]);
       await addPayee.wait();
 
-      expect(await wallet.payee(2)).to.equal(addr3.toString());
-      expect(await wallet.shares(addr3.toString())).to.equal("2000");
-      expect(await wallet.claimed(addr3.toString())).to.equal("0");
+      expect(await wallet.payee(2)).to.equal(investorAddr3.address);
+      expect(await wallet.shares(investorAddr3.address)).to.equal("2000");
+      expect(await wallet.claimed(investorAddr3.address)).to.equal("0");
       expect(await wallet.totalShares()).to.equal("3500");
       expect(await wallet.totalClaimed()).to.equal("0");
     });
   
-    it("Transfer Tokens to Contract", async function () {
-      const tokenContractTransfer = await testToken.transfer(wallet.address, ethers.utils.parseUnits('350', 18));
-      await tokenContractTransfer.wait();
-      expect(await testToken.balanceOf(wallet.address)).to.equal(ethers.utils.parseUnits('350', 18));
+    describe("Release Batch 1 Tokens to Investors", function () {
+      it("Transfer Batch 1 Tokens", async function () {
+        let contractTokenBal = await testToken.balanceOf(wallet.address);
+        const tokenContractTransfer = await testToken.transfer(wallet.address, ethers.utils.parseUnits('350', 18));
+        await tokenContractTransfer.wait();
+        expect(await testToken.balanceOf(wallet.address)).to.equal(contractTokenBal.add(ethers.utils.parseUnits('350', 18)));
+      });
+  
+      it("Release Batch 1 Tokens", async function () {
+        releasing = 10;
+        released += releasing;
+        const releaseBatch = await wallet.releaseBatch(releasing);
+        await releaseBatch.wait();
+      });
+
+      it("Investor 1 Claiming Token", async function () {
+        addrReleasing[0] = (addrShares[0] * (100 - addrFees[0]) / 100 * released / 100) - addrClaimed[0];
+        const releaseTokens = await wallet.connect(investorAddr1).release();
+        await releaseTokens.wait();
+        
+        addrClaimed[0] += addrReleasing[0];
+        claimed += addrReleasing[0];
+        expect(await testToken.balanceOf(investorAddr1.address)).to.equal(investorAddrBal[0].add(ethers.utils.parseUnits(addrReleasing[0].toString(), 18)));
+        expect(await wallet.totalClaimed()).to.equal(claimed);
+        investorAddrBal[0] = await testToken.balanceOf(investorAddr1.address);
+        feesReleasing += addrReleasing[0] * addrFees[0] / (100 - addrFees[0]);
+
+        addrReleasing[0] = 0;
+      });
+  
+      it("Owner Claim Fees Token", async function () {
+        const releaseFees = await wallet.releaseFees();
+        await releaseFees.wait();
+  
+        feesClaimed += feesReleasing;
+        claimed += feesReleasing;
+        expect(await testToken.balanceOf(designWalletAddr.address)).to.equal(ethers.utils.parseUnits(feesClaimed.toString(), 18));
+        expect(await wallet.totalClaimed()).to.equal(claimed);
+        feesReleasing = 0;
+      });
     });
 
-    it("Release Batch 1", async function () {
-      const addPayees = await wallet._addPayees([addr1.toString(), addr2.toString(), addr3.toString()], [1000, 500, 2000], [5, 10, 0]);
-      await addPayees.wait();
+    describe("Release Batch 2 Tokens to Investors", function () {
+      it("Transfer Batch 2 Tokens", async function () {
+        let contractTokenBal = await testToken.balanceOf(wallet.address);
+        const tokenContractTransfer = await testToken.transfer(wallet.address, ethers.utils.parseUnits('700', 18));
+        await tokenContractTransfer.wait();
+        expect(await testToken.balanceOf(wallet.address)).to.equal(contractTokenBal.add(ethers.utils.parseUnits('700', 18)));
+      });
+  
+      it("Release Batch 2 Tokens", async function () {
+        releasing = 20;
+        released += releasing;
+        const releaseBatch = await wallet.releaseBatch(releasing);
+        await releaseBatch.wait();
+      });
 
-      const tokenContractTransfer = await testToken.transfer(wallet.address, ethers.utils.parseUnits('350', 18));
-      await tokenContractTransfer.wait();
+      it("Investor 2 Claiming Token", async function () {
+        addrReleasing[1] = (addrShares[1] * (100 - addrFees[1]) / 100 * released / 100) - addrClaimed[1];
+        const releaseTokens = await wallet.connect(investorAddr2).release();
+        await releaseTokens.wait();
+  
+        addrClaimed[1] += addrReleasing[1];
+        claimed += addrReleasing[1];
+        expect(await testToken.balanceOf(investorAddr2.address)).to.equal(investorAddrBal[1].add(ethers.utils.parseUnits(addrReleasing[1].toString(), 18)));
+        expect(await wallet.totalClaimed()).to.equal(claimed);
+        investorAddrBal[1] = await testToken.balanceOf(investorAddr2.address);
+        feesReleasing += addrReleasing[1] * addrFees[1] / (100 - addrFees[1]);
+        addrReleasing[1] = 0;
+      });
+    });
 
-      let ownerBal = await testToken.balanceOf(addr2.toString());
-      let released = 0;
-      let releasing = 0;
-      let addrShares = 500;
-      let addrFees = 10;
-      let addrReleasing = 0;
-      let feesReleasing = 0;
-      let addrClaimed = 0;
-      let feesClaimed = 0;
-      let claimed = 0;
+    describe("Release Batch 3 Tokens to Investors", function () {
+      it("Transfer Batch 3 Tokens", async function () {
+        let contractTokenBal = await testToken.balanceOf(wallet.address);
+        const tokenContractTransfer = await testToken.transfer(wallet.address, ethers.utils.parseUnits('1050', 18));
+        await tokenContractTransfer.wait();
+        expect(await testToken.balanceOf(wallet.address)).to.equal(contractTokenBal.add(ethers.utils.parseUnits('1050', 18)));
+      });
+  
+      it("Release Batch 3 Tokens", async function () {
+        releasing = 30;
+        released += releasing;
+        const releaseBatch = await wallet.releaseBatch(releasing);
+        await releaseBatch.wait();
+      });
 
-      //First Batch Release with Fees Claim
+      it("Investor 1 Claiming Token", async function () {
+        addrReleasing[0] = (addrShares[0] * (100 - addrFees[0]) / 100 * released / 100) - addrClaimed[0];
+        const releaseTokens = await wallet.connect(investorAddr1).release();
+        await releaseTokens.wait();
+  
+        addrClaimed[0] += addrReleasing[0];
+        claimed += addrReleasing[0];
+        expect(await testToken.balanceOf(investorAddr1.address)).to.equal(investorAddrBal[0].add(ethers.utils.parseUnits(addrReleasing[0].toString(), 18)));
+        expect(await wallet.totalClaimed()).to.equal(claimed);
+        investorAddrBal[0] = await testToken.balanceOf(investorAddr1.address);
+        feesReleasing += addrReleasing[0] * addrFees[0] / (100 - addrFees[0]);
+        addrReleasing[0] = 0;
+      });
 
-      releasing = 10;
-      released += releasing;
-      const releaseBatch = await wallet.releaseBatch(releasing);
-      await releaseBatch.wait();
+      it("Investor 2 Claiming Token", async function () {
+        addrReleasing[1] = (addrShares[1] * (100 - addrFees[1]) / 100 * released / 100) - addrClaimed[1];
+        const releaseTokens = await wallet.connect(investorAddr2).release();
+        await releaseTokens.wait();
+  
+        addrClaimed[1] += addrReleasing[1];
+        claimed += addrReleasing[1];
+        expect(await testToken.balanceOf(investorAddr2.address)).to.equal(investorAddrBal[1].add(ethers.utils.parseUnits(addrReleasing[1].toString(), 18)));
+        expect(await wallet.totalClaimed()).to.equal(claimed);
+        investorAddrBal[1] = await testToken.balanceOf(investorAddr2.address);
+        feesReleasing += addrReleasing[1] * addrFees[1] / (100 - addrFees[1]);
+        addrReleasing[1] = 0;
+      });
 
-      addrReleasing = addrShares * (100 - addrFees) / 100 * releasing / 100;
-      const releaseTokens = await wallet.release();
-      await releaseTokens.wait();
-
-      addrClaimed += addrReleasing;
-      claimed += addrReleasing;
-      expect(await testToken.balanceOf(addr2.toString())).to.equal(ownerBal.add(ethers.utils.parseUnits(addrReleasing.toString(), 18)));
-      expect(await wallet.totalClaimed()).to.equal(claimed);
-      ownerBal = await testToken.balanceOf(addr2.toString());
-      addrReleasing = 0;
-
-      const releaseFees = await wallet.releaseFees();
-      await releaseFees.wait();
-
-      feesReleasing = addrShares * addrFees / 100 * releasing / 100;
-      feesClaimed += feesReleasing;
-      claimed += feesReleasing;
-      expect(await testToken.balanceOf(addr1.toString())).to.equal(ethers.utils.parseUnits(feesClaimed.toString(), 18));
-      expect(await wallet.totalClaimed()).to.equal(claimed);
-      ownerBal = await testToken.balanceOf(addr2.toString());
-      feesReleasing = 0;
-
-      //Second Batch Release without Fees Claim
-
-      releasing = 20;
-      released += releasing;
-      const releaseBatch2 = await wallet.releaseBatch(releasing);
-      await releaseBatch2.wait();
-
-      addrReleasing = addrShares * (100 - addrFees) / 100 * releasing / 100;
-      const releaseTokens2 = await wallet.release();
-      await releaseTokens2.wait();
-
-      addrClaimed += addrReleasing;
-      claimed += addrReleasing;
-      expect(await testToken.balanceOf(addr2.toString())).to.equal(ownerBal.add(ethers.utils.parseUnits(addrReleasing.toString(), 18)));
-      expect(await wallet.totalClaimed()).to.equal(claimed);
-      ownerBal = await testToken.balanceOf(addr2.toString());
-      addrReleasing = 0;
-      feesReleasing += addrShares * addrFees / 100 * releasing / 100;
-
-      //Third Batch Release with Fees Claim
-
-      releasing = 30;
-      released += releasing;
-      const releaseBatch3 = await wallet.releaseBatch(releasing);
-      await releaseBatch3.wait();
-
-      addrReleasing = addrShares * (100 - addrFees) / 100 * releasing / 100;
-      const releaseTokens3 = await wallet.release();
-      await releaseTokens3.wait();
-
-      addrClaimed += addrReleasing;
-      claimed += addrReleasing;
-      expect(await testToken.balanceOf(addr2.toString())).to.equal(ownerBal.add(ethers.utils.parseUnits(addrReleasing.toString(), 18)));
-      expect(await wallet.totalClaimed()).to.equal(claimed);
-      ownerBal = await testToken.balanceOf(addr2.toString());
-      addrReleasing = 0;
-      
-      const releaseFees3 = await wallet.releaseFees();
-      await releaseFees3.wait();
-
-      feesReleasing += addrShares * addrFees / 100 * releasing / 100;
-      feesClaimed += feesReleasing;
-      claimed += feesReleasing;
-      expect(await testToken.balanceOf(addr1.toString())).to.equal(ethers.utils.parseUnits(feesClaimed.toString(), 18));
-      expect(await wallet.totalClaimed()).to.equal(claimed);
-      ownerBal = await testToken.balanceOf(addr2.toString());feesReleasing = 0;
+      it("Investor 3 Claiming Token", async function () {
+        addrReleasing[2] = (addrShares[2] * (100 - addrFees[2]) / 100 * released / 100) - addrClaimed[2];
+        const releaseTokens = await wallet.connect(investorAddr3).release();
+        await releaseTokens.wait();
+  
+        addrClaimed[2] += addrReleasing[2];
+        claimed += addrReleasing[2];
+        expect(await testToken.balanceOf(investorAddr3.address)).to.equal(investorAddrBal[2].add(ethers.utils.parseUnits(addrReleasing[2].toString(), 18)));
+        expect(await wallet.totalClaimed()).to.equal(claimed);
+        investorAddrBal[2] = await testToken.balanceOf(investorAddr3.address);
+        feesReleasing += addrReleasing[2] * addrFees[2] / (100 - addrFees[2]);
+        addrReleasing[2] = 0;
+      });
+  
+      it("Owner Claim Fees Token", async function () {
+        const releaseFees = await wallet.releaseFees();
+        await releaseFees.wait();
+  
+        feesClaimed += feesReleasing;
+        claimed += feesReleasing;
+        expect(await testToken.balanceOf(designWalletAddr.address)).to.equal(ethers.utils.parseUnits(feesClaimed.toString(), 18));
+        expect(await wallet.totalClaimed()).to.equal(claimed);
+        feesReleasing = 0;
+      });
     });
   });
 });
