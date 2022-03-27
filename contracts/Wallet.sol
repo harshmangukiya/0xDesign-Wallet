@@ -63,6 +63,7 @@ contract DesignWallet is Context, Ownable {
     constructor(string memory investment, IERC20 tokenAddress) payable {
         _investment = investment;
         _tokenAddress = tokenAddress;
+        _0xDesignAddress = msg.sender;
     }
 
     /**
