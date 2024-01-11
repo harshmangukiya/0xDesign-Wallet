@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// OpenZeppelin Contracts v4.4.1 (finance/DesignWallet.sol)
+// Made from OpenZeppelin Contracts v4.4.1 (finance/PaymentSplitter.sol)
 
 pragma solidity ^0.8.0;
 
@@ -33,6 +33,7 @@ contract DesignWallet is Context, Ownable {
 
     string public _investment; //Investment Name
     IERC20 public _tokenAddress; //Investment Token Address
+    uint8 public _tokenDecimal = 18; //Investment Token Decimal (18 as Default)
 
     address public _0xDesignAddress; //0xDesign Address
 
@@ -62,6 +63,7 @@ contract DesignWallet is Context, Ownable {
     constructor(string memory investment, IERC20 tokenAddress) payable {
         _investment = investment;
         _tokenAddress = tokenAddress;
+        _0xDesignAddress = msg.sender;
     }
 
     /**
@@ -132,7 +134,7 @@ contract DesignWallet is Context, Ownable {
         uint256 feesPayment = _feesCalculator(msg.sender, payment);
         _totalFeesCollected += feesPayment;
 
-        SafeERC20.safeTransfer(_tokenAddress, msg.sender, payment * 10^18);
+        SafeERC20.safeTransfer(_tokenAddress, msg.sender, payment * 10**_tokenDecimal);
         emit ERC20PaymentReleased(_tokenAddress, msg.sender, payment);
     }
 
@@ -167,7 +169,7 @@ contract DesignWallet is Context, Ownable {
         _totalFeesClaimed += feesPayment;
         _totalClaimed += feesPayment;
 
-        SafeERC20.safeTransfer(_tokenAddress, _0xDesignAddress, feesPayment * 10^18);
+        SafeERC20.safeTransfer(_tokenAddress, _0xDesignAddress, feesPayment * 10**_tokenDecimal);
         emit ERC20PaymentReleased(_tokenAddress, _0xDesignAddress, feesPayment);
     }
 
@@ -214,6 +216,10 @@ contract DesignWallet is Context, Ownable {
 
     function changeTokenAddress(IERC20 newTokenAddress) public onlyOwner {
         _tokenAddress = newTokenAddress;
+    }
+
+    function changeTokenDecimal(uint8 newTokenDecimal) public onlyOwner {
+        _tokenDecimal = newTokenDecimal;
     }
 
     function releaseBatch(uint256 percentage) public onlyOwner {
